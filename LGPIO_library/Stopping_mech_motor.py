@@ -7,7 +7,7 @@ DIR_PIN_1 = 24          # driver IN1
 DIR_PIN_2 = 25          # driver IN2
 LOWER_SWITCH_PIN = 16   # lower limit switch (other side to GND)
 UPPER_SWITCH_PIN = 17   # upper limit switch (other side to GND)
-RESET_BUTTON_PIN = 27   # reset button (other side to GND)
+RESET_BUTTON_PIN = 24   # reset button (other side to GND)
 
 # ---------- Settings ----------
 CHIP = 4                # Pi 5 header = gpiochip4 (use 0 on Pi 4 and earlier)
