@@ -82,6 +82,8 @@ def main():
     p.add_argument("-c", "--channel", type=int, default=0, help="ADC channel number")
     p.add_argument("--vref", type=float, default=3.3, help="MCP30xx reference voltage")
     p.add_argument("--pin", type=int, default=17, help="GPIO pin, BCM (digital only)")
+    p.add_argument("--stop-voltage", type=float, default=4.00,
+                   help="stop logging when voltage exceeds this value (ADC modes only)")
     args = p.parse_args()
 
     if args.rate <= 0:
@@ -113,6 +115,7 @@ def main():
         next_t = start
         last_flush = start
         count = 0
+        tripped = False
 
         while running:
             now = time.monotonic()
@@ -124,6 +127,10 @@ def main():
                    round(elapsed, 4)] + list(read())
             writer.writerow(row)
             count += 1
+            if args.adc != "digital" and row[3] > args.stop_voltage:
+                f.flush()
+                tripped = True
+                break
 
             if now - last_flush >= 1.0:
                 f.flush()
@@ -137,7 +144,9 @@ def main():
             else:
                 next_t = time.monotonic()
 
-    print(f"\nDone. {count} samples saved to {args.output}")
+        if tripped:
+        print(f"\nStopped: voltage {row[3]} V exceeded {args.stop_voltage} V")
+        print(f"Done. {count} samples saved to {args.output}")
 
 
 if __name__ == "__main__":
