@@ -82,7 +82,7 @@ def main():
     p.add_argument("-c", "--channel", type=int, default=0, help="ADC channel number")
     p.add_argument("--vref", type=float, default=3.3, help="MCP30xx reference voltage")
     p.add_argument("--pin", type=int, default=17, help="GPIO pin, BCM (digital only)")
-    p.add_argument("--stop-voltage", type=float, default=4.00,
+    p.add_argument("--stop-voltage", type=float, default=3.70,
                    help="stop logging when voltage exceeds this value (ADC modes only)")
     args = p.parse_args()
 
@@ -117,6 +117,9 @@ def main():
         count = 0
         tripped = False
 
+        counter = 0
+        minimumRepeats = 2
+
         while running:
             now = time.monotonic()
             elapsed = now - start
@@ -128,10 +131,13 @@ def main():
             writer.writerow(row)
             count += 1
             if args.adc != "digital" and row[3] > args.stop_voltage:
+                counter += 1
+
+            if minimumRepeats <= counter:
                 f.flush()
                 tripped = True
                 break
-
+                            
             if now - last_flush >= 1.0:
                 f.flush()
                 last_flush = now
