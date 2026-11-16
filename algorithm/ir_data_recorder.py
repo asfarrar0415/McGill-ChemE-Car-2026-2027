@@ -132,7 +132,8 @@ def main():
             count += 1
             if args.adc != "digital" and row[3] > args.stop_voltage:
                 counter += 1
-
+            else:
+                counter = 0
             if minimumRepeats <= counter:
                 f.flush()
                 tripped = True
