@@ -20,7 +20,7 @@ MAX_RUN_SECONDS = 30    # safety timeout per move
 DEBOUNCE_US = 20000     # 20 ms
 
 
-def run_stopping_mech)motor(should_stop=None, chip=CHIP, lower_speed=LOWER_SPEED,
+def run_stopping_mech_motor(should_stop=None, chip=CHIP, lower_speed=LOWER_SPEED,
                     raise_speed=RAISE_SPEED, max_run_seconds=MAX_RUN_SECONDS):
     """
     Wait for button presses and run the contraption:
