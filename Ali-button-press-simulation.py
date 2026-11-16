@@ -26,23 +26,25 @@ try:
 
     #button_released: 
     lgpio.gpio_write(handle, pinOutput, 1)
+    print("button released")
 finally:
     #Releasing teh pin to not have it locked: 
     lgpio.gpio_free(handle, pinOutput) # free pin
- #    lgpio.gpiochip_close(handle) free chip 
+    lgpio.gpiochip_close(handle)# free chip 
 
 #if we are simulating receiving a signal
 pinB = 27
 #lgpio.SET_PULL_UP reads the inicial high voltage as the circuit is open
 #when the button is pressed and connects to ground, and the signal goes to 0
 
+handle = lgpio.gpiochip_open(0)
 try:
     #lgpio.SET_PULL_UP reads the current signal as 1
     lgpio.gpio_claim_input(handle, pinB, lgpio.SET_PULL_UP)
 
     #looping a finite amount of time here so the programm ends:
-    for x in range (100):
-        time.sleep(0.1)# 10 ms * 100 = runs for 10s
+    for x in range (1000):
+        time.sleep(0.01)# 1 ms * 1000 = runs for 10s
         state = lgpio.gpio_read(handle, pinB )
         #if the voltage drops lower than the standard set by lgpio.SET_PULL_UP state = 0
         if state == 0:
