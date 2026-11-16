@@ -4,8 +4,8 @@ import time
 
 # ---------- Pin configuration (BCM numbering) ----------
 MOTOR_PWM_PIN = 18      # driver enable / PWM input
-DIR_PIN_1 = 23          # driver IN1
-DIR_PIN_2 = 22          # driver IN2
+DIR_PIN_1 = 14          # driver IN1
+DIR_PIN_2 = 15          # driver IN2
 LOWER_SWITCH_PIN = 16   # lower limit switch (other side to GND)
 UPPER_SWITCH_PIN = 17   # upper limit switch (other side to GND)
 START_BUTTON_PIN = 25   # start button (other side to GND)
