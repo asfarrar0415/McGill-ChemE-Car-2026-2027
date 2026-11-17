@@ -19,9 +19,7 @@ import threading
 import time
 import traceback
 from datetime import datetime
- 
 import lgpio
- 
 from dependencies.ads1115 import init_ads1115
 from dependencies.algorithm import algo
 from dependencies.board import Board
