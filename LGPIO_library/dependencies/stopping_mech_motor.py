@@ -1,122 +1,114 @@
-# contraption.py
+import time 
 import lgpio
-import time
-
-# ---------- Pin configuration (BCM numbering) ----------
+ 
+# ---------- Defaults (BCM numbering) ----------
 MOTOR_PWM_PIN = 18      # driver enable / PWM input
 DIR_PIN_1 = 14          # driver IN1
 DIR_PIN_2 = 15          # driver IN2
 LOWER_SWITCH_PIN = 16   # lower limit switch (other side to GND)
 UPPER_SWITCH_PIN = 17   # upper limit switch (other side to GND)
-START_BUTTON_PIN = 25   # start button (other side to GND)
-RESET_BUTTON_PIN = 24   # reset button (other side to GND)
-
-# ---------- Default settings ----------
-CHIP = 4                # Pi 5 header = gpiochip4 (use 0 on Pi 4 and earlier)
+ 
 PWM_FREQ = 1000         # Hz
 LOWER_SPEED = 60        # duty cycle %, 0-100
 RAISE_SPEED = 80
 MAX_RUN_SECONDS = 30    # safety timeout per move
 DEBOUNCE_US = 20000     # 20 ms
-
-
-def run_stopping_mech_motor(should_stop=None, chip=CHIP, lower_speed=LOWER_SPEED,
-                    raise_speed=RAISE_SPEED, max_run_seconds=MAX_RUN_SECONDS):
+ 
+REACHED, TIMEOUT, ABORTED = "reached", "timeout", "aborted"
+ 
+ 
+class StoppingMech:
     """
-    Wait for button presses and run the contraption:
-      START button -> lower until the lower limit switch triggers
-      RESET button -> raise until the upper limit switch triggers
-
-    Blocks until Ctrl+C, or until should_stop() returns True
-    (should_stop is an optional function you pass in; it is checked
-    between button presses, not in the middle of a move).
-
-    GPIO is always released and the motor turned off when this returns.
+    Lowers/raises the contraption between two limit switches.
+ 
+    It does NOT watch any buttons and does NOT open its own GPIO chip.
+    The caller passes in an open lgpio handle and decides when to move.
+    Each move returns "reached", "timeout" or "aborted".
     """
-    input_pins = (LOWER_SWITCH_PIN, UPPER_SWITCH_PIN,
-                  START_BUTTON_PIN, RESET_BUTTON_PIN)
-    output_pins = (MOTOR_PWM_PIN, DIR_PIN_1, DIR_PIN_2)
-
-    h = lgpio.gpiochip_open(chip)
-
-    def pressed(pin):
-        return lgpio.gpio_read(h, pin) == 0
-
-    def wait_for_release(pin):
-        while pressed(pin):
-            time.sleep(0.01)
-
-    def motor_off():
-        lgpio.tx_pwm(h, MOTOR_PWM_PIN, PWM_FREQ, 0)
-        lgpio.gpio_write(h, MOTOR_PWM_PIN, 0)
-        lgpio.gpio_write(h, DIR_PIN_1, 0)
-        lgpio.gpio_write(h, DIR_PIN_2, 0)
-
-    def move(direction, speed, stop_switch_pin, label):
-        """Run the motor until stop_switch_pin is pressed or the timeout hits."""
-        if pressed(stop_switch_pin):
-            print(f"Already at the {label}")
-            return True
-
-        # Set direction (swap these if your motor runs backwards)
-        if direction == "down":
-            lgpio.gpio_write(h, DIR_PIN_1, 1)
-            lgpio.gpio_write(h, DIR_PIN_2, 0)
-        else:
-            lgpio.gpio_write(h, DIR_PIN_1, 0)
-            lgpio.gpio_write(h, DIR_PIN_2, 1)
-
-        print(f"Moving {direction}...")
-        lgpio.tx_pwm(h, MOTOR_PWM_PIN, PWM_FREQ, speed)
-
-        start = time.time()
-        reached = False
-        while time.time() - start < max_run_seconds:
-            if pressed(stop_switch_pin):
-                reached = True
-                break
-            time.sleep(0.005)
-
-        motor_off()
-
-        if reached:
-            print(f"Reached the {label}")
-        else:
-            print(f"Timeout: {label} switch never triggered, motor stopped for safety")
-        return reached
-
-    try:
-        for pin in output_pins:
-            lgpio.gpio_claim_output(h, pin, 0)
-        for pin in input_pins:
-            lgpio.gpio_claim_input(h, pin, lgpio.SET_PULL_UP)
-            lgpio.gpio_set_debounce_micros(h, pin, DEBOUNCE_US)
-
-        print("Ready. START = lower the contraption, RESET = raise it to the top.")
-        while not (should_stop and should_stop()):
-            if pressed(START_BUTTON_PIN):
-                print("Start button pressed")
-                move("down", lower_speed, LOWER_SWITCH_PIN, "bottom")
-                wait_for_release(START_BUTTON_PIN)
-                print("Waiting for the next button press...")
-
-            elif pressed(RESET_BUTTON_PIN):
-                print("Reset button pressed")
-                move("up", raise_speed, UPPER_SWITCH_PIN, "top")
-                wait_for_release(RESET_BUTTON_PIN)
-                print("Waiting for the next button press...")
-
-            time.sleep(0.01)
-
-    except KeyboardInterrupt:
-        print("\nStopped by user")
-
-    finally:
-        motor_off()
-        for pin in output_pins + input_pins:
-            lgpio.gpio_free(h, pin)
-        lgpio.gpiochip_close(h)
-
-
-if __name__ == "__main__":
-    run_contraption()
+ 
+    def __init__(self, h, pwm_pin=MOTOR_PWM_PIN, dir1=DIR_PIN_1, dir2=DIR_PIN_2,
+                 lower_pin=LOWER_SWITCH_PIN, upper_pin=UPPER_SWITCH_PIN,
+                 pwm_freq=PWM_FREQ, lower_speed=LOWER_SPEED, raise_speed=RAISE_SPEED,
+                 max_run_seconds=MAX_RUN_SECONDS):
+        self.h = h
+        self.pwm_pin, self.dir1, self.dir2 = pwm_pin, dir1, dir2
+        self.lower_pin, self.upper_pin = lower_pin, upper_pin
+        self.pwm_freq = pwm_freq
+        self.lower_speed, self.raise_speed = lower_speed, raise_speed
+        self.max_run_seconds = max_run_seconds
+        self._outputs = (pwm_pin, dir1, dir2)
+        self._inputs = (lower_pin, upper_pin)
+        self._claimed = False
+        self._claim()
+ 
+    # ---------- pin setup ----------
+    def _claim(self):
+        for pin in self._outputs:
+            lgpio.gpio_claim_output(self.h, pin, 0)
+        for pin in self._inputs:
+            lgpio.gpio_claim_input(self.h, pin, lgpio.SET_PULL_UP)
+            lgpio.gpio_set_debounce_micros(self.h, pin, DEBOUNCE_US)
+        self._claimed = True
+ 
+    def close(self):
+        """Stop the motor and release the pins (not the chip handle)."""
+        if not self._claimed:
+            return
+        self.motor_off()
+        for pin in self._outputs + self._inputs:
+            try:
+                lgpio.gpio_free(self.h, pin)
+            except Exception:
+                pass
+        self._claimed = False
+ 
+    # ---------- state ----------
+    def _pressed(self, pin):
+        return lgpio.gpio_read(self.h, pin) == 0
+ 
+    def at_top(self):
+        return self._pressed(self.upper_pin)
+ 
+    def at_bottom(self):
+        return self._pressed(self.lower_pin)
+ 
+    def motor_off(self):
+        lgpio.tx_pwm(self.h, self.pwm_pin, self.pwm_freq, 0)
+        lgpio.gpio_write(self.h, self.pwm_pin, 0)
+        lgpio.gpio_write(self.h, self.dir1, 0)
+        lgpio.gpio_write(self.h, self.dir2, 0)
+ 
+    # ---------- movement ----------
+    def _move(self, direction, speed, stop_pin, abort=None):
+        if self._pressed(stop_pin):
+            return REACHED
+ 
+        # Swap these two values if your motor runs backwards
+        down = direction == "down"
+        lgpio.gpio_write(self.h, self.dir1, 1 if down else 0)
+        lgpio.gpio_write(self.h, self.dir2, 0 if down else 1)
+        lgpio.tx_pwm(self.h, self.pwm_pin, self.pwm_freq, speed)
+ 
+        result = TIMEOUT
+        try:
+            start = time.monotonic()
+            while time.monotonic() - start < self.max_run_seconds:
+                if self._pressed(stop_pin):
+                    result = REACHED
+                    break
+                if abort and abort():
+                    result = ABORTED
+                    break
+                time.sleep(0.005)
+        finally:
+            self.motor_off()
+        return result
+ 
+    def lower(self, abort=None):
+        """Lower until the bottom switch. abort() is polled during the move."""
+        return self._move("down", self.lower_speed, self.lower_pin, abort)
+ 
+    def raise_to_top(self, abort=None):
+        """Raise until the top switch. abort() is polled during the move."""
+        return self._move("up", self.raise_speed, self.upper_pin, abort)
+ 
