@@ -1,3 +1,4 @@
+
 import csv
 import time
 from datetime import datetime
@@ -7,7 +8,7 @@ MAX_CONSECUTIVE_READ_ERRORS = 10
  
 def algo(read, output="ir_data.csv", rate=10, duration=0,
          stop_value=None, stop_below=None, stop_index=-1, header=("voltage_v",),
-         should_stop=None, verbose=True):
+         should_stop=None, verbose=True, stop_count=1):
     """
     Log readings from read() to a CSV file at a fixed rate.
  
@@ -15,8 +16,10 @@ def algo(read, output="ir_data.csv", rate=10, duration=0,
     output      CSV path (appended to if it exists)
     rate        samples per second
     duration    seconds to record (0 = until stopped)
-    stop_value  stop when the reading rises ABOVE this (None = off)
+    stop_value  stop when the reading is AT or ABOVE this (None = off)
     stop_below  stop when the reading falls BELOW this (None = off)
+    stop_count  how many samples IN A ROW must cross the threshold before it
+                stops (default 1). A sample back inside the limit resets the count.
     stop_index  which element of the reading to compare (default: last)
     header      column names for the values returned by read()
     should_stop optional function; logging ends when it returns True
@@ -33,6 +36,7 @@ def algo(read, output="ir_data.csv", rate=10, duration=0,
     tripped = False
     error = None
     bad_reads = 0
+    streak = 0              # consecutive samples past the threshold
  
     with open(output, "a", newline="") as f:
         writer = csv.writer(f)
@@ -69,11 +73,13 @@ def algo(read, output="ir_data.csv", rate=10, duration=0,
                 count += 1
  
                 v = values[stop_index]
-                if ((stop_value is not None and v > stop_value) or
-                        (stop_below is not None and v < stop_below)):
+                crossed = ((stop_value is not None and v >= stop_value) or
+                           (stop_below is not None and v < stop_below))
+                streak = streak + 1 if crossed else 0
+                if streak >= stop_count:
                     tripped = True
                     if verbose:
-                        print(f"\nStopped: value {v} crossed the threshold")
+                        print(f"\nStopped: {streak} readings in a row past the threshold (last {v})")
                     break
  
                 if now - last_flush >= 1.0:
