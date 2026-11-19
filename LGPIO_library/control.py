@@ -41,7 +41,8 @@ DEBOUNCE_US = 20000
 POLL_S = 0.02
  
 LOG_RATE_HZ = 10
-STOP_ABOVE_MV = None     # TODO: set your threshold, e.g. 2500.0 (stop when mV rises above)
+STOP_ABOVE_MV = 3700.0   # stop when the reading is at or above this many mV (3.7 V)
+STOP_CONSECUTIVE = 5     # ...for this many samples IN A ROW (5 = 0.5 s at 10 Hz)
 STOP_BELOW_MV = None     # TODO: ...or when it falls below this
 MAX_CAR_RUN_SECONDS = 120    # watchdog: car always stops after this
 USE_ENCODER = False      # True = also log encoder distance/speed (needs SPI + LS7366R)
@@ -142,6 +143,7 @@ class Controller:
                     header=("mv",),
                     stop_value=STOP_ABOVE_MV,
                     stop_below=STOP_BELOW_MV,
+                    stop_count=STOP_CONSECUTIVE,
                     should_stop=stop_logging.is_set,
                     verbose=False))
             except Exception:
