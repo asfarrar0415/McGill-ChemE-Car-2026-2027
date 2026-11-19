@@ -1,4 +1,6 @@
-import time 
+
+import time
+ 
 import lgpio
  
 # ---------- Defaults (BCM numbering) ----------
@@ -13,6 +15,10 @@ LOWER_SPEED = 60        # duty cycle %, 0-100
 RAISE_SPEED = 80
 MAX_RUN_SECONDS = 30    # safety timeout per move
 DEBOUNCE_US = 20000     # 20 ms
+ 
+# Your limit switches read backwards (typical of normally-closed contacts):
+# True makes the code treat a physical press as "pressed".
+SWITCHES_INVERTED = True
  
 REACHED, TIMEOUT, ABORTED = "reached", "timeout", "aborted"
  
@@ -29,8 +35,9 @@ class StoppingMech:
     def __init__(self, h, pwm_pin=MOTOR_PWM_PIN, dir1=DIR_PIN_1, dir2=DIR_PIN_2,
                  lower_pin=LOWER_SWITCH_PIN, upper_pin=UPPER_SWITCH_PIN,
                  pwm_freq=PWM_FREQ, lower_speed=LOWER_SPEED, raise_speed=RAISE_SPEED,
-                 max_run_seconds=MAX_RUN_SECONDS):
+                 max_run_seconds=MAX_RUN_SECONDS, invert_switches=SWITCHES_INVERTED):
         self.h = h
+        self.invert_switches = invert_switches
         self.pwm_pin, self.dir1, self.dir2 = pwm_pin, dir1, dir2
         self.lower_pin, self.upper_pin = lower_pin, upper_pin
         self.pwm_freq = pwm_freq
@@ -64,7 +71,8 @@ class StoppingMech:
  
     # ---------- state ----------
     def _pressed(self, pin):
-        return lgpio.gpio_read(self.h, pin) == 0
+        low = lgpio.gpio_read(self.h, pin) == 0     # raw: pin pulled to GND
+        return low != self.invert_switches          # flip if the switch reads backwards
  
     def at_top(self):
         return self._pressed(self.upper_pin)
