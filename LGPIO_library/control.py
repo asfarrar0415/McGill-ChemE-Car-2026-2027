@@ -14,17 +14,21 @@ Cycle:
        -> car off, stop recording -> RESETTING (mech back to top) -> IDLE
  
 RESET while IDLE raises the mech to the top (manual homing).
+RESET at any other time stops every motor (car + mech) immediately, if still
+running. Pressing RESET again during a raise stops that raise too.
 """
 import threading
 import time
 import traceback
 from datetime import datetime
+ 
 import lgpio
+ 
 from dependencies.ads1115 import init_ads1115
 from dependencies.algorithm import algo
 from dependencies.board import Board
 from dependencies.ls7366r_encoder_control import run_ls7366r
-from dependencies.stopping_mech_motor import StoppingMech, REACHED
+from dependencies.stopping_mech_motor import StoppingMech, REACHED, ABORTED
  
 # ---------- Pins (BCM) ----------
 START = 25
@@ -76,6 +80,19 @@ class Controller:
  
     def _car(self, on):
         lgpio.gpio_write(self.h, CAR_MOTOR, 1 if on else 0)
+ 
+    def _stop_motors(self):
+        """Cut every motor (car + stopping mech). Safe to call repeatedly:
+        it does nothing if they are already stopped."""
+        try:
+            self._car(False)
+        except Exception:
+            traceback.print_exc()
+        try:
+            if self.mech:
+                self.mech.motor_off()
+        except Exception:
+            traceback.print_exc()
  
     # ---------- setup / teardown ----------
     def setup(self):
@@ -163,16 +180,21 @@ class Controller:
             else:
                 print(f"Lowering ended with '{outcome}', car not started")
         finally:
-            self._car(False)           # always off, whatever happened
+            self._stop_motors()        # RESET (or any exit): every motor off, whatever happened
             stop_logging.set()
             for t in threads:
                 t.join(timeout=5)
             if result:
                 print(f"Log: {result}")
  
+            # The RESET press that ended the run must be released first, otherwise
+            # it would immediately cancel the raise below.
+            self._wait_for_release(RESET)
             self._status("RESETTING")
-            # Only shutdown aborts the raise (RESET is probably still held)
-            self.mech.raise_to_top(abort=self.shutdown.is_set)
+            # A NEW RESET press (or shutdown) stops the raise
+            if self.mech.raise_to_top(abort=self._abort) == ABORTED:
+                self._stop_motors()
+                self._status("STOPPED")
             self._wait_for_release(RESET)
  
     # ---------- main loop ----------
@@ -197,7 +219,11 @@ class Controller:
                     self.run_cycle()
                 else:
                     self._status("RESETTING")
-                    self.mech.raise_to_top(abort=self.shutdown.is_set)
+                    # Pressing RESET again stops the raise
+                    if self.mech.raise_to_top(abort=self._abort) == ABORTED:
+                        self._stop_motors()
+                        self._status("STOPPED")
+                        self._wait_for_release(RESET)   # don't re-trigger from the same press
         except KeyboardInterrupt:
             print("\nStopped by user")
         except Exception:
