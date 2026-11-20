@@ -25,6 +25,7 @@ from datetime import datetime
 import lgpio
  
 from dependencies.ads1115 import init_ads1115
+from dependencies.ina226 import init_ina226, INA226_HEADER
 from dependencies.algorithm import algo
 from dependencies.board import Board
 from dependencies.ls7366r_encoder_control import run_ls7366r
@@ -47,6 +48,13 @@ STOP_BELOW_MV = None     # TODO: ...or when it falls below this
 MAX_CAR_RUN_SECONDS = 120    # watchdog: car always stops after this
 USE_ENCODER = False      # True = also log encoder distance/speed (needs SPI + LS7366R)
  
+# INA226 on the I2C bus, monitoring the external power source -> its own CSV
+USE_INA226 = True
+INA226_ADDR = 0x40
+INA226_BUS = 1               # I2C bus number (1 on a Pi)
+INA226_SHUNT_OHMS = 0.0945   # taken from your old INA226 settings; check your board (often 0.1 or 0.01)
+INA226_LOG_RATE_HZ = 10
+ 
  
 class Controller:
     def __init__(self, on_status=print):
@@ -57,6 +65,7 @@ class Controller:
         self.h = None
         self.mech = None
         self.ads = None
+        self.ina = None
         self._pins = ()
  
     # ---------- helpers ----------
@@ -108,6 +117,14 @@ class Controller:
         self.mech = StoppingMech(self.h)
         self.ads = init_ads1115()
  
+        if USE_INA226:      # monitoring is optional: a missing INA226 shouldn't block runs
+            try:
+                self.ina = init_ina226(INA226_ADDR, INA226_BUS, INA226_SHUNT_OHMS)
+            except Exception:
+                traceback.print_exc()
+                print("WARNING: INA226 not available, power-source data will NOT be logged")
+                self.ina = None
+ 
     def cleanup(self):
         self.shutdown.set()
         try:
@@ -119,6 +136,8 @@ class Controller:
             self.mech.close()
         if self.ads:
             self.ads.close()
+        if self.ina:
+            self.ina.close()
         for pin in self._pins:
             try:
                 lgpio.gpio_free(self.h, pin)
@@ -157,6 +176,24 @@ class Controller:
                 target=run_ls7366r, name="encoder",
                 args=(stop_logging,), kwargs={"output": f"encoder_{stamp}.csv"}))
  
+        ina_result = {}
+ 
+        def ina_logger():
+            """Voltage, current, resistance and power of the external source."""
+            try:
+                ina_result.update(algo(
+                    read=self.ina.read_row,
+                    output=f"ina226_{stamp}.csv",
+                    rate=INA226_LOG_RATE_HZ,
+                    header=INA226_HEADER,
+                    should_stop=stop_logging.is_set,
+                    verbose=False))
+            except Exception:
+                traceback.print_exc()
+ 
+        if self.ina is not None:
+            threads.append(threading.Thread(target=ina_logger, name="ina226"))
+ 
         try:
             for t in threads:
                 t.start()
@@ -188,6 +225,8 @@ class Controller:
                 t.join(timeout=5)
             if result:
                 print(f"Log: {result}")
+            if ina_result:
+                print(f"INA226 log: {ina_result}")
  
             # The RESET press that ended the run must be released first, otherwise
             # it would immediately cancel the raise below.
