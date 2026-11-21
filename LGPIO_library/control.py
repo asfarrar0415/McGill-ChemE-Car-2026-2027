@@ -13,6 +13,8 @@ Cycle:
           or MAX_CAR_RUN_SECONDS passes
        -> car off, stop recording -> RESETTING (mech back to top) -> IDLE
  
+If LOWER_SECONDS is set, the mech lowers for that long (ignoring the bottom
+switch) and the algorithm + car motor start as soon as it stops.
 RESET while IDLE raises the mech to the top (manual homing).
 RESET at any other time stops every motor (car + mech) immediately, if still
 running. Pressing RESET again during a raise stops that raise too.
@@ -46,6 +48,10 @@ STOP_CONSECUTIVE = 5     # ...for this many samples IN A ROW (5 = 0.5 s at 10 Hz
 STOP_BELOW_MV = None     # TODO: ...or when it falls below this
 MAX_CAR_RUN_SECONDS = 120    # watchdog: car always stops after this
 USE_ENCODER = False      # True = also log encoder distance/speed (needs SPI + LS7366R)
+ 
+# Lower the mech for this many seconds instead of waiting for the bottom switch,
+# then start the algorithm. Set to None to go back to using the bottom switch.
+LOWER_SECONDS = 2.0
  
  
 class Controller:
@@ -158,13 +164,18 @@ class Controller:
                 args=(stop_logging,), kwargs={"output": f"encoder_{stamp}.csv"}))
  
         try:
-            for t in threads:
-                t.start()
- 
             self._status("LOWERING")
-            outcome = self.mech.lower(abort=self._abort)
+            if LOWER_SECONDS is None:
+                for t in threads:                  # switch mode: record a baseline while lowering
+                    t.start()
+                outcome = self.mech.lower(abort=self._abort)
+            else:
+                outcome = self.mech.lower_for(LOWER_SECONDS, abort=self._abort)
  
             if outcome == REACHED:
+                if LOWER_SECONDS is not None:      # timed mode: algorithm starts once the mech stops
+                    for t in threads:
+                        t.start()
                 self._status("RUNNING")
                 self._car(True)
                 deadline = time.monotonic() + MAX_CAR_RUN_SECONDS
@@ -185,7 +196,8 @@ class Controller:
             self._stop_motors()        # RESET (or any exit): every motor off, whatever happened
             stop_logging.set()
             for t in threads:
-                t.join(timeout=5)
+                if t.is_alive():                   # threads that never started can't be joined
+                    t.join(timeout=5)
             if result:
                 print(f"Log: {result}")
  
