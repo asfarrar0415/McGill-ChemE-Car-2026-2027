@@ -87,8 +87,13 @@ class StoppingMech:
         lgpio.gpio_write(self.h, self.dir2, 0)
  
     # ---------- movement ----------
-    def _move(self, direction, speed, stop_pin, abort=None):
-        if self._pressed(stop_pin):
+    def _move(self, direction, speed, stop_pin, abort=None, run_seconds=None):
+        """run_seconds=None: run until stop_pin is pressed (or the safety timeout).
+        run_seconds=N: run for exactly N seconds and IGNORE the limit switch;
+        returns REACHED when the time is up."""
+        timed = run_seconds is not None
+        limit = run_seconds if timed else self.max_run_seconds
+        if not timed and self._pressed(stop_pin):
             return REACHED
  
         # Swap these two values if your motor runs backwards
@@ -100,8 +105,8 @@ class StoppingMech:
         result = TIMEOUT
         try:
             start = time.monotonic()
-            while time.monotonic() - start < self.max_run_seconds:
-                if self._pressed(stop_pin):
+            while time.monotonic() - start < limit:
+                if not timed and self._pressed(stop_pin):
                     result = REACHED
                     break
                 if abort and abort():
@@ -110,11 +115,18 @@ class StoppingMech:
                 time.sleep(0.005)
         finally:
             self.motor_off()
+        if timed and result == TIMEOUT:
+            result = REACHED            # the full time elapsed: that was the goal
         return result
  
     def lower(self, abort=None):
         """Lower until the bottom switch. abort() is polled during the move."""
         return self._move("down", self.lower_speed, self.lower_pin, abort)
+ 
+    def lower_for(self, seconds, abort=None):
+        """Lower for a fixed time, ignoring the bottom switch. abort() is polled."""
+        return self._move("down", self.lower_speed, self.lower_pin, abort,
+                          run_seconds=seconds)
  
     def raise_to_top(self, abort=None):
         """Raise until the top switch. abort() is polled during the move."""
